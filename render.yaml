@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: kindle-dash
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python serve.py

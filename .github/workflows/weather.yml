@@ -1,0 +1,28 @@
+name: Weather
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: weather
+  cancel-in-progress: true
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lay du lieu thoi tiet
+        run: python3 fetch_weather.py
+      - name: Dua len nhanh data
+        run: |
+          mkdir -p /tmp/out && cp weather.json /tmp/out/
+          git config user.name "weather-bot"
+          git config user.email "weather-bot@users.noreply.github.com"
+          git checkout --orphan data
+          git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/out/weather.json .
+          git add weather.json
+          git commit -m "weather"
+          git push --force origin data

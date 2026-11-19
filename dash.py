@@ -143,13 +143,29 @@ def uv_label(v):
     return "Cực cao"
 
 # ---------------------------------------------------------------- dữ liệu
-def http_json(url, timeout=20):
-    req = urllib.request.Request(url, headers={"User-Agent": "kindle-dash-vn/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+def http_json(url, timeout=25, tries=4):
+    """Tải JSON; gặp 429/5xx (máy chủ dùng chung bị giới hạn) thì chờ rồi thử lại."""
+    import random, time as _t, urllib.error
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "kindle-dash-vn/1.0 (personal e-ink dashboard)"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code not in (429, 500, 502, 503, 504):
+                raise
+        except Exception as e:
+            last = e
+        print("Tải lỗi (%s), thử lại lần %d..." % (last, i + 1), flush=True)
+        if i < tries - 1:
+            _t.sleep(2 * (i + 1) + random.random())
+    raise last
 
-_RAW = {"t": 0.0, "w": None, "aq": None}
-RAW_TTL = 600  # giây: dữ liệu thời tiết thô được dùng lại tối đa 10 phút
+_RAW = {"t": 0.0, "w": None, "aq": None, "fail_t": 0.0}
+RAW_TTL = 900     # giây: dữ liệu thời tiết thô được dùng lại tối đa 15 phút
+RETRY_GAP = 30    # giây: sau một lần lỗi, chờ ít nhất ngần này mới gọi lại
 
 def fetch_raw():
     q = urllib.parse.urlencode({
@@ -163,7 +179,7 @@ def fetch_raw():
     try:
         q2 = urllib.parse.urlencode({"latitude": config.LAT, "longitude": config.LON,
                                      "timezone": "Asia/Bangkok", "current": "us_aqi,pm2_5"}, safe=",")
-        aq = http_json("https://air-quality-api.open-meteo.com/v1/air-quality?" + q2).get("current", {})
+        aq = http_json("https://air-quality-api.open-meteo.com/v1/air-quality?" + q2, tries=2).get("current", {})
     except Exception as e:  # AQI hỏng thì vẫn vẽ phần còn lại
         print("Không lấy được AQI:", e)
     return w, aq
@@ -204,14 +220,18 @@ def fetch_live(now):
     import time as _t
     ts = _t.time()
     if _RAW["w"] is None or ts - _RAW["t"] > RAW_TTL:
-        try:
-            w, aq = fetch_raw()
-            _RAW.update(t=ts, w=w, aq=aq)
-        except Exception:
-            if _RAW["w"] is None:
-                raise
-            print("Dùng lại dữ liệu cũ trong bộ nhớ")
-    return process(_RAW["w"], _RAW["aq"], now)
+        if ts - _RAW["fail_t"] > RETRY_GAP or _RAW["w"] is None and ts - _RAW["fail_t"] > 5:
+            try:
+                w, aq = fetch_raw()
+                _RAW.update(t=ts, w=w, aq=aq, fail_t=0.0)
+            except Exception as e:
+                _RAW["fail_t"] = ts
+                print("Không làm mới được dữ liệu:", e, flush=True)
+                if _RAW["w"] is None:
+                    raise
+    data = process(_RAW["w"], _RAW["aq"], now)
+    data["_stale"] = (ts - _RAW["t"]) > 3600     # quá 1 giờ chưa làm mới được -> báo "dữ liệu cũ"
+    return data
 
 def demo_data(now):
     """Dữ liệu mẫu giống ảnh bạn gửi (dùng để xem thử, không cần mạng)."""
@@ -235,9 +255,13 @@ def get_data(now, demo=False):
     cache = os.path.join(HERE, "cache.json")
     try:
         data = fetch_live(now)
-        with open(cache, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False)
-        return data, False
+        stale = data.pop("_stale", False)
+        try:
+            with open(cache, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False)
+        except OSError:
+            pass
+        return data, stale
     except Exception as e:
         print("Không lấy được dữ liệu mới:", e)
         if os.path.exists(cache):

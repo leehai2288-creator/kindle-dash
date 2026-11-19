@@ -143,46 +143,28 @@ def uv_label(v):
     return "Cực cao"
 
 # ---------------------------------------------------------------- dữ liệu
-def http_json(url, timeout=25, tries=4):
-    """Tải JSON; gặp 429/5xx (máy chủ dùng chung bị giới hạn) thì chờ rồi thử lại."""
-    import random, time as _t, urllib.error
-    last = None
-    for i in range(tries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "kindle-dash-vn/1.0 (personal e-ink dashboard)"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            last = e
-            if e.code not in (429, 500, 502, 503, 504):
-                raise
-        except Exception as e:
-            last = e
-        print("Tải lỗi (%s), thử lại lần %d..." % (last, i + 1), flush=True)
-        if i < tries - 1:
-            _t.sleep(2 * (i + 1) + random.random())
-    raise last
+import time as _time
+from openmeteo import http_json, fetch_raw as fetch_raw_direct
 
-_RAW = {"t": 0.0, "w": None, "aq": None, "fail_t": 0.0}
-RAW_TTL = 900     # giây: dữ liệu thời tiết thô được dùng lại tối đa 15 phút
+_RAW = {"t": 0.0, "w": None, "aq": None, "fail_t": 0.0, "try_t": 0.0}
+RAW_TTL = 900     # giây: dữ liệu thô được dùng lại tối đa 15 phút
 RETRY_GAP = 30    # giây: sau một lần lỗi, chờ ít nhất ngần này mới gọi lại
+MAX_JSON_AGE = 6 * 3600   # dữ liệu GitHub cũ hơn mức này thì bỏ, gọi trực tiếp
 
 def fetch_raw():
-    q = urllib.parse.urlencode({
-        "latitude": config.LAT, "longitude": config.LON, "timezone": "Asia/Bangkok", "forecast_days": 4,
-        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code",
-        "hourly": "temperature_2m,precipitation_probability,uv_index",
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min,uv_index_max",
-    }, safe=",")
-    w = http_json("https://api.open-meteo.com/v1/forecast?" + q)
-    aq = {}
-    try:
-        q2 = urllib.parse.urlencode({"latitude": config.LAT, "longitude": config.LON,
-                                     "timezone": "Asia/Bangkok", "current": "us_aqi,pm2_5"}, safe=",")
-        aq = http_json("https://air-quality-api.open-meteo.com/v1/air-quality?" + q2, tries=2).get("current", {})
-    except Exception as e:  # AQI hỏng thì vẫn vẽ phần còn lại
-        print("Không lấy được AQI:", e)
-    return w, aq
+    """Trả về (thời tiết, AQI, thời điểm dữ liệu được lấy). Ưu tiên bản GitHub lấy sẵn."""
+    url = getattr(config, "WEATHER_JSON_URL", "")
+    if url:
+        try:
+            j = http_json(url + "?m=%d" % int(_time.time() // 60), timeout=20, tries=2)
+            age = _time.time() - float(j.get("fetched", 0))
+            if j.get("w") and age < MAX_JSON_AGE:
+                return j["w"], j.get("aq") or {}, float(j["fetched"])
+            print("Dữ liệu GitHub quá cũ (%d phút), gọi trực tiếp." % (age / 60), flush=True)
+        except Exception as e:
+            print("Chưa đọc được dữ liệu GitHub (%s), gọi trực tiếp." % e, flush=True)
+    w, aq = fetch_raw_direct()
+    return w, aq, _time.time()
 
 def process(w, aq, now):
     cur = w["current"]
@@ -217,20 +199,24 @@ def process(w, aq, now):
     }
 
 def fetch_live(now):
-    import time as _t
-    ts = _t.time()
-    if _RAW["w"] is None or ts - _RAW["t"] > RAW_TTL:
-        if ts - _RAW["fail_t"] > RETRY_GAP or _RAW["w"] is None and ts - _RAW["fail_t"] > 5:
-            try:
-                w, aq = fetch_raw()
-                _RAW.update(t=ts, w=w, aq=aq, fail_t=0.0)
-            except Exception as e:
-                _RAW["fail_t"] = ts
-                print("Không làm mới được dữ liệu:", e, flush=True)
-                if _RAW["w"] is None:
-                    raise
+    ts = _time.time()
+    stale_data = _RAW["w"] is None
+    due = stale_data or (ts - _RAW["t"] > RAW_TTL and ts - _RAW["try_t"] > 120)
+    gap_ok = ts - _RAW["fail_t"] > (5 if stale_data else RETRY_GAP)
+    if due and gap_ok:
+        _RAW["try_t"] = ts
+        try:
+            w, aq, fetched = fetch_raw()
+            _RAW.update(t=fetched, w=w, aq=aq, fail_t=0.0)
+        except Exception as e:
+            _RAW["fail_t"] = ts
+            print("Không làm mới được dữ liệu:", e, flush=True)
+            if _RAW["w"] is None:
+                raise
+    if _RAW["w"] is None:
+        raise RuntimeError("Chua co du lieu thoi tiet, thu lai sau it giay")
     data = process(_RAW["w"], _RAW["aq"], now)
-    data["_stale"] = (ts - _RAW["t"]) > 3600     # quá 1 giờ chưa làm mới được -> báo "dữ liệu cũ"
+    data["_stale"] = (ts - _RAW["t"]) > 3600     # quá 1 giờ chưa có dữ liệu mới -> báo "dữ liệu cũ"
     return data
 
 def demo_data(now):

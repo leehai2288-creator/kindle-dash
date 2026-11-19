@@ -14,3 +14,7 @@ FOOTER_LEFT = ""                 # ví dụ: tên quán của bạn
 ROTATE_DEG = 90
 
 PORT = 8080                      # cổng máy chủ ảnh trên PC
+
+# Dữ liệu thời tiết do GitHub Actions lấy sẵn (tránh bị Open-Meteo chặn địa chỉ chung của Render).
+# Để trống ("") nếu muốn máy chủ tự gọi Open-Meteo.
+WEATHER_JSON_URL = "https://raw.githubusercontent.com/leehai2288-creator/kindle-dash/data/weather.json"

@@ -5,7 +5,7 @@ PLACE = "HÀ ĐÔNG · HÀ NỘI"      # dòng tiêu đề góc trên bên trái
 LAT, LON = 20.9719, 105.7788     # tọa độ Hà Đông
 UTC_OFFSET_HOURS = 7             # giờ Việt Nam
 
-REFRESH_MINUTES = 5              # bao lâu vẽ lại ảnh một lần (Kindle cũng nên tải với chu kỳ này)
+REFRESH_MINUTES = 1              # bao lâu vẽ lại ảnh một lần (Kindle cũng nên tải với chu kỳ này)
 FOOTER_LEFT = ""                 # ví dụ: tên quán của bạn
 
 # Hướng xoay ảnh để khớp màn hình Kindle (đặt Kindle nằm ngang).

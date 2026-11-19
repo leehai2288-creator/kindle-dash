@@ -383,9 +383,9 @@ def render(data, now, stale=False):
         d.rectangle([int(cx - 34), ty0 + 150, int(cx + 34), ty0 + 184], outline=BLACK, width=2)
         T(d, cx, ty0 + 175, "UV %d" % round(h["uv"]), F("semi", 22), anchor="ms")
     d.rectangle([rc0, 604, rc0 + 14, 618], fill=BLACK)
-    T(d, rc0 + 22, 620, "Thanh = xác suất mưa", F("reg", 21))
+    T(d, rc0 + 22, 620, "Thanh = % mưa", F("reg", 21))
     if data.get("uv_peak") is not None:
-        T(d, rc1, 620, "UV hôm nay: đỉnh %d lúc %s · %s" % (data["uv_peak"], data["uv_peak_time"], uv_label(data["uv_peak"])),
+        T(d, rc1, 620, "UV đỉnh %d lúc %s · %s" % (data["uv_peak"], data["uv_peak_time"], uv_label(data["uv_peak"])),
           F("reg", 21), anchor="rs")
 
     # ---- dự báo 3 ngày
